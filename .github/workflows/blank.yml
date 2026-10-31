@@ -1,0 +1,29 @@
+name: Windows CI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  windows-test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Show Windows version
+        run: systeminfo
+
+      - name: Check PowerShell
+        shell: pwsh
+        run: |
+          Write-Host "Windows runner is working!"
+          Write-Host "Computer name:"
+          $env:COMPUTERNAME
+          Write-Host "PowerShell version:"
+          $PSVersionTable.PSVersion
+
+      - name: Check available disk space
+        shell: pwsh
+        run: |
+          Get-PSDrive -PSProvider FileSystem
+
+      - name: Finish
+        run: echo Windows test completed successfully!
