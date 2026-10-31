@@ -29,34 +29,26 @@ jobs:
           Add-LocalGroupMember -Group "Administrators" -Member "RDP"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
 
-      - name: Install Tailscale
+      - name: Install Tailscale via Chocolatey
         run: |
-          $tsUrl = "https://tailscale.com"
-          $installerPath = "$env:TEMP\tailscale.msi"
-          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
-          Remove-Item $installerPath -Force
+          # Gukoresha choco kuko yo ihita ifungura inzira neza
+          choco install tailscale -y --no-progress
+          
+          # Guhata Windows kongera gufungura urutonde rw'inzira (Refresh PATH)
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 
       - name: Establish Tailscale Connection
         run: |
-          # Gushakisha inzira nyayo Tailscale yagiye itajanditswe mu buryo bwa hardcode
-          $tsExe = (Get-Command tailscale.exe -ErrorAction SilentlyContinue).Source
-          if (-not $tsExe) {
-              $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
-          }
-          if (-not (Test-Path $tsExe)) {
-              $tsExe = "C:\Users\runneradmin\AppData\Local\Programs\Tailscale\tailscale.exe"
-          }
+          # Kongera gufresha urutonde rw'inzira muri ino step nshya
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
           
-          Write-Host "Using Tailscale path: $tsExe"
-          
-          # Gutangiza Tailscale ikoresheje inzira ihuye
-          & $tsExe up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
+          # Gutangiza Tailscale (bwa mbere ikoresheje izina gusa)
+          tailscale up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
           
           $tsIP = $null
           $retries = 0
           while (-not $tsIP -and $retries -lt 10) {
-              $tsIP = & $tsExe ip -4
+              $tsIP = tailscale ip -4
               Start-Sleep -Seconds 5
               $retries++
           }
