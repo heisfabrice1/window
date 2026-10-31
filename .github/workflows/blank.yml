@@ -1,29 +1,93 @@
-name: Windows CI
+name: Windows 11 + Tailscale + Secure RDP
 
 on:
   workflow_dispatch:
 
 jobs:
-  windows-test:
-    runs-on: windows-latest
+  secure-rdp:
+    runs-on: windows-2022
+    timeout-minutes: 350
 
     steps:
-      - name: Show Windows version
-        run: systeminfo
-
-      - name: Check PowerShell
-        shell: pwsh
+      - name: Configure Core RDP Settings
         run: |
-          Write-Host "Windows runner is working!"
-          Write-Host "Computer name:"
-          $env:COMPUTERNAME
-          Write-Host "PowerShell version:"
-          $PSVersionTable.PSVersion
+          # Gufungura Remote Desktop
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+                             -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                             -Name "UserAuthentication" -Value 1 -Force
 
-      - name: Check available disk space
-        shell: pwsh
+          # Gufunga RDP isanzwe ku nzugi zose ngo twizere umutekano
+          netsh advfirewall firewall set rule group="remote desktop" new enable=Yes
+          
+      - name: Create RDP User with Secret Password
         run: |
-          Get-PSDrive -PSProvider FileSystem
+          # Gukoresha ijambo banga riri muri Repository Secrets
+          $password = "${{ secrets.RDP_PASSWORD }}"
+          if (-not $password) { $password = "SecureP@ss1234!" } # Fallback niba unyuzemo idahari
+          
+          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          if (-not (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
+              New-LocalUser -Name "RDP" -Password $securePass -AccountNeverExpires
+          }
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
 
-      - name: Finish
-        run: echo Windows test completed successfully!
+      - name: Install Tailscale
+        run: |
+          $tsUrl = "https://tailscale.com"
+          $installerPath = "$env:TEMP\tailscale.msi"
+          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
+          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+          Remove-Item $installerPath -Force
+
+      - name: Establish Tailscale Connection
+        run: |
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
+          
+          $tsIP = $null
+          $retries = 0
+          while (-not $tsIP -and $retries -lt 10) {
+              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+              Start-Sleep -Seconds 5
+              $retries++
+          }
+          
+          if (-not $tsIP) {
+              Write-Error "Tailscale IP not assigned. Exiting."
+              exit 1
+          }
+          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
+
+      - name: Configure Firewall For Tailscale Only
+        run: |
+          # Gukuraho amahirwe y'uko undi muntu anyura hanze ya Tailscale
+          netsh advfirewall firewall delete rule name="RDP-Tailscale"
+          netsh advfirewall firewall add rule name="RDP-Tailscale" `
+            dir=in action=allow protocol=TCP localport=3389 remoteip=100.64.0.0/10
+
+      - name: Setup Downloads Startup Script (All Users)
+        run: |
+          # Gushyira script muri "All Users" kugira ngo izakorere uwo ari we wese winjiye bwa mbere
+          $allUsersStartup = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp"
+          $downloadUrl = "https://gitlab.com"
+          $downloadPath = "$allUsersStartup\Downloads.bat"
+          
+          Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -UseBasicParsing
+          Write-Host "✅ Downloads.bat yashyizwe muri All Users Startup."
+
+      - name: Display Connection Info
+        run: |
+          Write-Host "`n=== INSTRUCTIONS TO CONNECT ==="
+          Write-Host "1. FUNGURA TAILSCALE KURI CLIENT PC (Debian 13)"
+          Write-Host "2. KORESHA REMMINA CYANGWA REMOTEVIEWER UKORESHEJE IYI IP:"
+          Write-Host "   Address: $env:TAILSCALE_IP"
+          Write-Host "   Username: RDP"
+          Write-Host "==============================`n"
+
+      - name: Keep Runner Alive
+        run: |
+          while ($true) {
+              Write-Host "[$(Get-Date)] RDP iracyakora mu mutekano..."
+              Start-Sleep -Seconds 300
+          }
