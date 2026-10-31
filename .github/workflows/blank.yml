@@ -11,20 +11,16 @@ jobs:
     steps:
       - name: Configure Core RDP Settings
         run: |
-          # Gufungura Remote Desktop
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
                              -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
                              -Name "UserAuthentication" -Value 1 -Force
-
-          # Gufunga RDP isanzwe ku nzugi zose ngo twizere umutekano
           netsh advfirewall firewall set rule group="remote desktop" new enable=Yes
           
       - name: Create RDP User with Secret Password
         run: |
-          # Gukoresha ijambo banga riri muri Repository Secrets
           $password = "${{ secrets.RDP_PASSWORD }}"
-          if (-not $password) { $password = "SecureP@ss1234!" } # Fallback niba unyuzemo idahari
+          if (-not $password) { $password = "SecureP@ss1234!" }
           
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
           if (-not (Get-LocalUser -Name "RDP" -ErrorAction SilentlyContinue)) {
@@ -43,12 +39,24 @@ jobs:
 
       - name: Establish Tailscale Connection
         run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
+          # Gushakisha inzira nyayo Tailscale yagiye itajanditswe mu buryo bwa hardcode
+          $tsExe = (Get-Command tailscale.exe -ErrorAction SilentlyContinue).Source
+          if (-not $tsExe) {
+              $tsExe = "C:\Program Files\Tailscale\tailscale.exe"
+          }
+          if (-not (Test-Path $tsExe)) {
+              $tsExe = "C:\Users\runneradmin\AppData\Local\Programs\Tailscale\tailscale.exe"
+          }
+          
+          Write-Host "Using Tailscale path: $tsExe"
+          
+          # Gutangiza Tailscale ikoresheje inzira ihuye
+          & $tsExe up --authkey=${{ secrets.TAILSCALE_AUTHKEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
           
           $tsIP = $null
           $retries = 0
           while (-not $tsIP -and $retries -lt 10) {
-              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+              $tsIP = & $tsExe ip -4
               Start-Sleep -Seconds 5
               $retries++
           }
@@ -61,33 +69,29 @@ jobs:
 
       - name: Configure Firewall For Tailscale Only
         run: |
-          # Gukuraho amahirwe y'uko undi muntu anyura hanze ya Tailscale
           netsh advfirewall firewall delete rule name="RDP-Tailscale"
           netsh advfirewall firewall add rule name="RDP-Tailscale" `
             dir=in action=allow protocol=TCP localport=3389 remoteip=100.64.0.0/10
 
       - name: Setup Downloads Startup Script (All Users)
         run: |
-          # Gushyira script muri "All Users" kugira ngo izakorere uwo ari we wese winjiye bwa mbere
           $allUsersStartup = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp"
           $downloadUrl = "https://gitlab.com"
           $downloadPath = "$allUsersStartup\Downloads.bat"
           
           Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -UseBasicParsing
-          Write-Host "✅ Downloads.bat yashyizwe muri All Users Startup."
+          Write-Host "✅ Downloads.bat copied successfully."
 
       - name: Display Connection Info
         run: |
           Write-Host "`n=== INSTRUCTIONS TO CONNECT ==="
-          Write-Host "1. FUNGURA TAILSCALE KURI CLIENT PC (Debian 13)"
-          Write-Host "2. KORESHA REMMINA CYANGWA REMOTEVIEWER UKORESHEJE IYI IP:"
-          Write-Host "   Address: $env:TAILSCALE_IP"
-          Write-Host "   Username: RDP"
+          Write-Host "Address: $env:TAILSCALE_IP"
+          Write-Host "Username: RDP"
           Write-Host "==============================`n"
 
       - name: Keep Runner Alive
         run: |
           while ($true) {
-              Write-Host "[$(Get-Date)] RDP iracyakora mu mutekano..."
+              Write-Host "[$(Get-Date)] RDP active..."
               Start-Sleep -Seconds 300
           }
